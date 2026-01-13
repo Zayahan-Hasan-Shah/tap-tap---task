@@ -2,6 +2,7 @@ import 'package:flutter/material.dart' hide FilterChip;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:product_task/core/constants/app_theme.dart';
+import 'package:product_task/core/theme/theme_cubit.dart';
 import 'package:product_task/core/utils/responsive.dart';
 import 'package:product_task/feature/product/domain/entities/product_entity.dart';
 import 'package:product_task/feature/product/presentation/blocs/cubits/product_cubit_state/product_cubit.dart';
@@ -24,6 +25,14 @@ class _ProductListPageState extends State<ProductListPage> {
   bool _showInStockOnly = false;
   int _selectedIndex = 1;
 
+  // Pagination
+  int _currentPage = 1;
+  final int _itemsPerPage = 10;
+
+  // Sorting
+  String _sortColumn = 'title';
+  bool _sortAscending = true;
+
   @override
   Widget build(BuildContext context) {
     final isMobile = Responsive.isMobile(context);
@@ -31,11 +40,51 @@ class _ProductListPageState extends State<ProductListPage> {
 
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: CustomAppBar(
-        title: 'Product Dashboard',
-        mobileTitle: 'Products',
-        onRefresh: () => context.read<ProductCubit>().fetchProducts(),
-        avatar: const AppBarAvatar(initial: 'A'),
+      appBar: AppBar(
+        elevation: 0,
+        backgroundColor: AppColors.primary,
+        title: Row(
+          children: [
+            if (!isMobile) ...[
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.accent.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.inventory_2, color: Colors.white, size: 24),
+              ),
+              const SizedBox(width: 12),
+            ],
+            Text(
+              isMobile ? 'Products' : 'Product Dashboard',
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: isMobile ? 18 : 20),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh',
+            onPressed: () => context.read<ProductCubit>().fetchProducts(),
+          ),
+          BlocBuilder<ThemeCubit, ThemeMode>(
+            builder: (context, themeMode) {
+              final isDark = themeMode == ThemeMode.dark;
+              return IconButton(
+                icon: Icon(isDark ? Icons.light_mode : Icons.dark_mode),
+                tooltip: isDark ? 'Light Mode' : 'Dark Mode',
+                onPressed: () => context.read<ThemeCubit>().toggleTheme(),
+              );
+            },
+          ),
+          if (!isMobile) const SizedBox(width: 8),
+          if (!isMobile)
+            const Padding(
+              padding: EdgeInsets.only(right: 16),
+              child: AppBarAvatar(initial: 'A'),
+            ),
+        ],
       ),
       drawer: isMobile
           ? AppDrawer(
@@ -186,16 +235,85 @@ class _ProductListPageState extends State<ProductListPage> {
       );
     }
 
+    final totalPages = _getTotalPages(products.length);
+    final paginatedProducts = _paginateProducts(products);
+
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxWidth < 600) {
-          return ProductListView(
-            products: products,
-            onProductTap: (product) => context.go('/product/${product.id}'),
+          return Column(
+            children: [
+              Expanded(
+                child: ProductListView(
+                  products: paginatedProducts,
+                  onProductTap: (product) => context.go('/product/${product.id}'),
+                ),
+              ),
+              _buildPaginationControls(products.length, totalPages),
+            ],
           );
         }
-        return _buildDataTable(products);
+        return Column(
+          children: [
+            Expanded(child: _buildDataTable(paginatedProducts)),
+            _buildPaginationControls(products.length, totalPages),
+          ],
+        );
       },
+    );
+  }
+
+  Widget _buildPaginationControls(int totalItems, int totalPages) {
+    return Container(
+      padding: const EdgeInsets.only(left: 20, right: 100, top: 12, bottom: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border(top: BorderSide(color: AppColors.border)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            'Showing ${((_currentPage - 1) * _itemsPerPage) + 1}-${(_currentPage * _itemsPerPage).clamp(1, totalItems)} of $totalItems',
+            style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+          ),
+          Row(
+            children: [
+              IconButton(
+                icon: Icon(Icons.first_page, color: _currentPage > 1 ? AppColors.textPrimary : AppColors.textMuted),
+                onPressed: _currentPage > 1 ? () => setState(() => _currentPage = 1) : null,
+                tooltip: 'First Page',
+              ),
+              IconButton(
+                icon: Icon(Icons.chevron_left, color: _currentPage > 1 ? AppColors.textPrimary : AppColors.textMuted),
+                onPressed: _currentPage > 1 ? () => setState(() => _currentPage--) : null,
+                tooltip: 'Previous Page',
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.accent,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '$_currentPage / $totalPages',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                ),
+              ),
+              IconButton(
+                icon: Icon(Icons.chevron_right, color: _currentPage < totalPages ? AppColors.textPrimary : AppColors.textMuted),
+                onPressed: _currentPage < totalPages ? () => setState(() => _currentPage++) : null,
+                tooltip: 'Next Page',
+              ),
+              IconButton(
+                icon: Icon(Icons.last_page, color: _currentPage < totalPages ? AppColors.textPrimary : AppColors.textMuted),
+                onPressed: _currentPage < totalPages ? () => setState(() => _currentPage = totalPages) : null,
+                tooltip: 'Last Page',
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -210,18 +328,48 @@ class _ProductListPageState extends State<ProductListPage> {
             dataRowMaxHeight: 70,
             columnSpacing: 20,
             horizontalMargin: 20,
-            columns: const [
-              DataColumn(label: _TableHeader(text: 'PRODUCT')),
-              DataColumn(label: _TableHeader(text: 'CATEGORY')),
-              DataColumn(label: _TableHeader(text: 'PRICE')),
-              DataColumn(label: _TableHeader(text: 'STATUS')),
-              DataColumn(label: _TableHeader(text: 'ACTIONS')),
+            sortColumnIndex: _getSortColumnIndex(),
+            sortAscending: _sortAscending,
+            columns: [
+              DataColumn(
+                label: const _TableHeader(text: 'PRODUCT'),
+                onSort: (_, __) => _onSort('title'),
+              ),
+              DataColumn(
+                label: const _TableHeader(text: 'CATEGORY'),
+                onSort: (_, __) => _onSort('category'),
+              ),
+              DataColumn(
+                label: const _TableHeader(text: 'PRICE'),
+                numeric: true,
+                onSort: (_, __) => _onSort('price'),
+              ),
+              DataColumn(
+                label: const _TableHeader(text: 'STATUS'),
+                onSort: (_, __) => _onSort('stock'),
+              ),
+              const DataColumn(label: _TableHeader(text: 'ACTIONS')),
             ],
             rows: products.map((product) => _buildDataRow(product)).toList(),
           ),
         ),
       ),
     );
+  }
+
+  int _getSortColumnIndex() {
+    switch (_sortColumn) {
+      case 'title':
+        return 0;
+      case 'category':
+        return 1;
+      case 'price':
+        return 2;
+      case 'stock':
+        return 3;
+      default:
+        return 0;
+    }
   }
 
   DataRow _buildDataRow(ProductEntity product) {
@@ -280,7 +428,8 @@ class _ProductListPageState extends State<ProductListPage> {
         onPressed: () => _showProductForm(context),
         backgroundColor: AppColors.accent,
         child: const Icon(Icons.add),
-      );
+        
+      );    
     }
     return FloatingActionButton.extended(
       onPressed: () => _showProductForm(context),
@@ -291,12 +440,58 @@ class _ProductListPageState extends State<ProductListPage> {
   }
 
   List<ProductEntity> _filterProducts(List<ProductEntity> products) {
-    return products.where((p) {
+    var filtered = products.where((p) {
       final matchesSearch = p.title.toLowerCase().contains(_searchQuery.toLowerCase());
       final matchesCategory = _selectedCategory == 'All' || p.category == _selectedCategory;
       final matchesStock = !_showInStockOnly || p.isInStock;
       return matchesSearch && matchesCategory && matchesStock;
     }).toList();
+
+    // Apply sorting
+    filtered.sort((a, b) {
+      int compare;
+      switch (_sortColumn) {
+        case 'title':
+          compare = a.title.compareTo(b.title);
+          break;
+        case 'category':
+          compare = a.category.compareTo(b.category);
+          break;
+        case 'price':
+          compare = a.price.compareTo(b.price);
+          break;
+        case 'stock':
+          compare = (a.isInStock ? 1 : 0).compareTo(b.isInStock ? 1 : 0);
+          break;
+        default:
+          compare = a.title.compareTo(b.title);
+      }
+      return _sortAscending ? compare : -compare;
+    });
+
+    return filtered;
+  }
+
+  List<ProductEntity> _paginateProducts(List<ProductEntity> products) {
+    final startIndex = (_currentPage - 1) * _itemsPerPage;
+    final endIndex = startIndex + _itemsPerPage;
+    if (startIndex >= products.length) return [];
+    return products.sublist(startIndex, endIndex.clamp(0, products.length));
+  }
+
+  int _getTotalPages(int totalItems) {
+    return (totalItems / _itemsPerPage).ceil();
+  }
+
+  void _onSort(String column) {
+    setState(() {
+      if (_sortColumn == column) {
+        _sortAscending = !_sortAscending;
+      } else {
+        _sortColumn = column;
+        _sortAscending = true;
+      }
+    });
   }
 
   void _showDeleteConfirmation(BuildContext context, ProductEntity product) {
